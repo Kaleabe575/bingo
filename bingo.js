@@ -452,7 +452,7 @@
                 return;
             }
             
-            // Mark as sent to prevent duplicate submissions
+            // Mark as sent immediately to prevent race conditions
             gameDataSent = true;
             
             try {
@@ -462,6 +462,7 @@
                 form.append('playersCount', String(playersCount));
                 form.append('gross', String(gross));
                 form.append('retailorCut', String(retailorCut));
+                form.append('gameSessionId', String(Date.now()) + '_' + Math.random().toString(36).substr(2, 9)); // Unique session ID
                 form.append('_', String(Date.now()));
                 if (navigator.sendBeacon) { navigator.sendBeacon(url, form); }
                 else { fetch(url, { method: 'POST', body: form, keepalive: true }).catch(function(){}); }
@@ -469,8 +470,25 @@
         }
 
 
-         window.addEventListener('beforeunload', function(){ sendGameEndData(); });
-         document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') sendGameEndData(); });
+                 // Single event handler to prevent multiple calls
+        function handlePageExit() {
+            sendGameEndData();
+            // Remove listeners after first call to prevent duplicates
+            window.removeEventListener('beforeunload', handlePageExit);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }
+        
+        function handleVisibilityChange() {
+            if (document.visibilityState === 'hidden') {
+                sendGameEndData();
+                // Remove listeners after first call to prevent duplicates
+                window.removeEventListener('beforeunload', handlePageExit);
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }
+        }
+        
+        window.addEventListener('beforeunload', handlePageExit);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
      });
  })(jQuery);
 
