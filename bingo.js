@@ -40,12 +40,14 @@
          let gameSpeed = 3000;
          const audioBase = '/wp-content/uploads/2025/08';
 
-         let interval = null;
-         let gamePaused = false;
-         let allowedPatterns = [];
-         let numbers = [];
-         let currentIndex = 0;
-         let calledCount = 0;
+                 let interval = null;
+        let gamePaused = false;
+        let allowedPatterns = [];
+        let numbers = [];
+        let currentIndex = 0;
+        let calledCount = 0;
+        let gameStarted = false; // Track if play button was pressed at least once
+        let gameDataSent = false; // Track if game end data was already sent
 
          function playAudio(file){
              if (!window._bingoAudio) window._bingoAudio = new Audio();
@@ -434,28 +436,37 @@
              } else if(gamePaused){
                  // Resume
                  interval=setInterval(callNextNumber,gameSpeed); gamePaused=false; $btn.find('.elementor-button-text').text('Pause'); playAudio('game-resumed.mp3'); $btn.prop('disabled', false);
-             } else {
-                 const validated = await startGameWithValidation();
-                 if (!validated) { $btn.prop('disabled', false); return; }
-                 numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
-                 currentIndex = 0; calledCount = 0; callNextNumber(); interval = setInterval(callNextNumber, gameSpeed); $btn.find('.elementor-button-text').text('Pause');
-                 $btn.prop('disabled', false);
-             }
+                         } else {
+                const validated = await startGameWithValidation();
+                if (!validated) { $btn.prop('disabled', false); return; }
+                gameStarted = true; // Mark that game was started
+                numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
+                currentIndex = 0; calledCount = 0; callNextNumber(); interval = setInterval(callNextNumber, gameSpeed); $btn.find('.elementor-button-text').text('Pause');
+                $btn.prop('disabled', false);
+            }
          });
 
-         function sendGameEndData() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_end_game');
-                 form.append('playersCount', String(playersCount));
-                 form.append('gross', String(gross));
-                 form.append('retailorCut', String(retailorCut));
-                 form.append('_', String(Date.now()));
-                 if (navigator.sendBeacon) { navigator.sendBeacon(url, form); }
-                 else { fetch(url, { method: 'POST', body: form, keepalive: true }).catch(function(){}); }
-             } catch (e) {}
-         }
+                 function sendGameEndData() {
+            // Only send data if the game was actually started (play button pressed) and not already sent
+            if (!gameStarted || gameDataSent) {
+                return;
+            }
+            
+            // Mark as sent to prevent duplicate submissions
+            gameDataSent = true;
+            
+            try {
+                const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
+                const form = new FormData();
+                form.append('action', 'bingo_end_game');
+                form.append('playersCount', String(playersCount));
+                form.append('gross', String(gross));
+                form.append('retailorCut', String(retailorCut));
+                form.append('_', String(Date.now()));
+                if (navigator.sendBeacon) { navigator.sendBeacon(url, form); }
+                else { fetch(url, { method: 'POST', body: form, keepalive: true }).catch(function(){}); }
+            } catch (e) {}
+        }
 
 
          window.addEventListener('beforeunload', function(){ sendGameEndData(); });
