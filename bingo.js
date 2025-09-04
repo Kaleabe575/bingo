@@ -49,18 +49,28 @@
         let gameStarted = false; // Track if play button was pressed at least once
         let gameDataSent = false; // Track if game end data was already sent
 
-         function playAudio(file){
-             if (!window._bingoAudio) window._bingoAudio = new Audio();
-             try {
-                 const audioUrl = audioBase + '/' + file;
-                 window._bingoAudio.src = audioUrl;
-                 window._bingoAudio.load();
-                 const playPromise = window._bingoAudio.play();
-                 if (playPromise !== undefined) {
-                     playPromise.catch(function(){});
-                 }
-             } catch(e) {}
-         }
+                 // Audio cache for better performance
+        const audioCache = {};
+        
+        function playAudio(file){
+            try {
+                const audioUrl = audioBase + '/' + file;
+                
+                // Use cached audio or create new one
+                if (!audioCache[file]) {
+                    audioCache[file] = new Audio();
+                    audioCache[file].src = audioUrl;
+                    audioCache[file].preload = 'auto';
+                }
+                
+                const audio = audioCache[file];
+                audio.currentTime = 0; // Reset to beginning
+                const playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(function(){});
+                }
+            } catch(e) {}
+        }
 
          (function prewarmAudio(){
              try {
@@ -418,33 +428,62 @@
              } catch (e) { alert('Unable to start game. Please try again.'); return false; }
          }
 
-         $(document).on("click", "#play_pause_game a.elementor-button", async function(e){
-             e.preventDefault();
-             const $btn=$(this);
-             if ($btn.prop('disabled')) return;
-             $btn.prop('disabled', true);
-             if (!navigator.onLine) { alert('No internet connection.'); $btn.prop('disabled', false); return; }
-             const runtime = await fetchRuntime();
-             if (!runtime) { alert('Unable to fetch game settings.'); $btn.prop('disabled', false); return; }
-             const fetchedSpeed = Number(runtime.game_speed || 3);
-             gameSpeed = (Number.isFinite(fetchedSpeed) ? fetchedSpeed : 3) * 1000;
-             allowedPatterns = Array.isArray(runtime.checking_pattern) ? runtime.checking_pattern : [];
+                 $(document).on("click", "#play_pause_game a.elementor-button", async function(e){
+            e.preventDefault();
+            const $btn=$(this);
+            if ($btn.prop('disabled')) return;
 
-             if(interval && !gamePaused){
-                 // Pause
-                 clearInterval(interval); interval=null; gamePaused=true; $btn.find('.elementor-button-text').text('Resume'); playAudio('Game-paused.mp3'); $btn.prop('disabled', false);
-             } else if(gamePaused){
-                 // Resume
-                 interval=setInterval(callNextNumber,gameSpeed); gamePaused=false; $btn.find('.elementor-button-text').text('Pause'); playAudio('game-resumed.mp3'); $btn.prop('disabled', false);
-                         } else {
+            if(interval && !gamePaused){
+                // Pause - no API call needed, instant response
+                clearInterval(interval); 
+                interval=null; 
+                gamePaused=true; 
+                $btn.find('.elementor-button-text').text('Resume'); 
+                playAudio('Game-paused.mp3');
+                return; // Exit early, no need to disable button
+            } else if(gamePaused){
+                // Resume - no API call needed, instant response
+                interval=setInterval(callNextNumber,gameSpeed); 
+                gamePaused=false; 
+                $btn.find('.elementor-button-text').text('Pause'); 
+                playAudio('game-resumed.mp3');
+                return; // Exit early, no need to disable button
+            } else {
+                // Starting new game - only then do we need API calls
+                $btn.prop('disabled', true);
+                if (!navigator.onLine) { 
+                    alert('No internet connection.'); 
+                    $btn.prop('disabled', false); 
+                    return; 
+                }
+                
+                const runtime = await fetchRuntime();
+                if (!runtime) { 
+                    alert('Unable to fetch game settings.'); 
+                    $btn.prop('disabled', false); 
+                    return; 
+                }
+                
+                const fetchedSpeed = Number(runtime.game_speed || 3);
+                gameSpeed = (Number.isFinite(fetchedSpeed) ? fetchedSpeed : 3) * 1000;
+                allowedPatterns = Array.isArray(runtime.checking_pattern) ? runtime.checking_pattern : [];
+
                 const validated = await startGameWithValidation();
-                if (!validated) { $btn.prop('disabled', false); return; }
+                if (!validated) { 
+                    $btn.prop('disabled', false); 
+                    return; 
+                }
+                
                 gameStarted = true; // Mark that game was started
                 numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
-                currentIndex = 0; calledCount = 0; callNextNumber(); interval = setInterval(callNextNumber, gameSpeed); $btn.find('.elementor-button-text').text('Pause');
+                currentIndex = 0; 
+                calledCount = 0; 
+                callNextNumber(); 
+                interval = setInterval(callNextNumber, gameSpeed); 
+                $btn.find('.elementor-button-text').text('Pause');
                 $btn.prop('disabled', false);
             }
-         });
+        });
 
                  function sendGameEndData() {
             // Only send data if the game was actually started (play button pressed) and not already sent
