@@ -70,11 +70,11 @@
              canPlay = Boolean(data.canPlay);
              
              // Store backend data for game start API call
-             backendGameData = {
-                 systemCut: Number(data.systemCommission || 0),
-                 retailorCut: Number(data.retailorCut || 0),
-                 gross: Number(data.gross || 0),
-                 numberOfPlayers: Number(data.numberOfPlayers || 0)
+             backendGameData = data.gameData || {
+                 systemCommission: 0,
+                 retailorCut: 0,
+                 gross: 0,
+                 numberOfPlayers: 0
              };
              
              // Cache runtime data for instant play button response
@@ -91,12 +91,7 @@
              
              gameInitialized = true;
              
-             console.log('Game initialized:', {
-                 gamePrize, canPlay, backendGameData
-             });
-             
          } catch (e) {
-             console.error('Game initialization error:', e);
              throw e; // Re-throw for promise chain
          }
      }
@@ -120,7 +115,6 @@
          
          // Additional validation - ensure we have the required session data
          if (!activeCards.length || !activeCartdsBinogoNumber.length || !cartelaPrice) {
-             console.error('Missing required session data for game initialization');
              if ($playBtn.length) {
                  $playBtn.prop('disabled', true);
                  $playBtn.find('.elementor-button-text').text('Invalid Game Data');
@@ -139,7 +133,6 @@
              initializationPromise.then(() => {
                  updateUIAfterInit($gamePrizeEl, $betEl, $playBtn);
              }).catch(e => {
-                 console.error('Game initialization failed:', e);
                  if ($playBtn.length) {
                      $playBtn.prop('disabled', true);
                      $playBtn.find('.elementor-button-text').text('Init Failed');
@@ -150,7 +143,6 @@
              initializeGame().then(() => {
                  updateUIAfterInit($gamePrizeEl, $betEl, $playBtn);
              }).catch(e => {
-                 console.error('Game initialization failed:', e);
                  if ($playBtn.length) {
                      $playBtn.prop('disabled', true);
                      $playBtn.find('.elementor-button-text').text('Init Failed');
@@ -204,26 +196,49 @@
          let calledCount = 0;
 
          function playAudio(file){
-             if (!window._bingoAudio) window._bingoAudio = new Audio();
              try {
+                 // Create new audio instance for each play to avoid conflicts
+                 const audio = new Audio();
                  const audioUrl = audioBase + '/' + file;
-                 window._bingoAudio.src = audioUrl;
-                 window._bingoAudio.load();
-                 const playPromise = window._bingoAudio.play();
+                 audio.src = audioUrl;
+                 audio.load();
+                 
+                 // Set volume and play
+                 audio.volume = 0.7;
+                 const playPromise = audio.play();
                  if (playPromise !== undefined) {
-                     playPromise.catch(function(){});
+                     playPromise.catch(function(){
+                         // Silent fail - don't interrupt game flow
+                     });
                  }
-             } catch(e) {}
+             } catch(e) {
+                 // Silent fail - don't interrupt game flow
+             }
          }
 
-         (function prewarmAudio(){
-             try {
-                 ["Game-paused.mp3","game-resumed.mp3"].forEach(function(f){
-                     const a = new Audio();
-                     a.preload = 'auto';
-                     a.src = audioBase + '/' + f;
-                 });
-             } catch(e) {}
+         // Preload critical audio files
+         (function preloadAudio(){
+             const criticalAudioFiles = [
+                 'Game-paused.mp3',
+                 'game-resumed.mp3',
+                 'won.mp3',
+                 'didnt-win.mp3'
+             ];
+             
+             criticalAudioFiles.forEach(function(file){
+                 try {
+                     const audio = new Audio();
+                     audio.preload = 'auto';
+                     audio.src = audioBase + '/' + file;
+                     // Force load by attempting to play and immediately pause
+                     audio.load();
+                     audio.addEventListener('canplaythrough', function() {
+                         // Audio is ready to play
+                     }, { once: true });
+                 } catch(e) {
+                     // Silent fail for individual audio files
+                 }
+             });
          })();
 
          function highlightBall(num){
@@ -529,7 +544,6 @@
 
 			// Final result based on allowed patterns
 			const hasWinningLine = eligibleCount >= requiredLines;
-			console.log('Pattern check - Required lines:', requiredLines, 'eligibleCount:', eligibleCount, 'allowedPatterns:', allowedPatterns);
 			if (hasWinningLine) { 
 				$msg.html('<span style="color:green;font-weight:bold;">አሸንፏል</span>'); 
 				playAudio('won.mp3'); 
@@ -546,7 +560,7 @@
                  const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
                  const form = new FormData();
                  form.append('action', 'bingo_start_game');
-                 form.append('systemCut', String(backendGameData.systemCut));
+                 form.append('systemCut', String(backendGameData.systemCommission));
                  form.append('retailorCut', String(backendGameData.retailorCut));
                  form.append('gross', String(backendGameData.gross));
                  form.append('numberOfPlayers', String(backendGameData.numberOfPlayers));
@@ -560,16 +574,12 @@
                      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
                  }).then(resp => resp.json())
                    .then(payload => {
-                       if (payload && payload.success) {
-                           console.log('Backend updated successfully:', payload.data);
-                       } else {
-                           console.warn('Backend update failed, but game continues');
-                       }
+                       // Silent background update - no logging needed
                    }).catch(e => {
-                       console.warn('Backend update error, but game continues:', e);
+                       // Silent error handling - game continues regardless
                    });
              } catch (e) {
-                 console.warn('Backend update error, but game continues:', e);
+                 // Silent error handling - game continues regardless
              }
          }
 

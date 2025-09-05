@@ -90,15 +90,17 @@ add_action('wp_ajax_bingo_init_game', function(){
     $cartelas_balance = intval(get_field('cartelas_balance', 'user_' . $user_id)) ?: 0;
     $can_play = $cartelas_balance >= $system_commission;
     
-    // Return calculated values to frontend
+    // Return only essential data to frontend
     wp_send_json_success([
         'gamePrize' => $game_prize,
         'canPlay' => $can_play,
-        'systemCommission' => $system_commission,
-        'retailorCut' => $retailor_cut,
-        'gross' => $gross,
-        'numberOfPlayers' => $number_of_players,
-        'currentBalance' => $cartelas_balance
+        // Backend data for game start API call
+        'gameData' => [
+            'systemCommission' => $system_commission,
+            'retailorCut' => $retailor_cut,
+            'gross' => $gross,
+            'numberOfPlayers' => $number_of_players
+        ]
     ]);
 });
 
