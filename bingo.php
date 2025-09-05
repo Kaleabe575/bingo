@@ -119,28 +119,85 @@ add_action('wp_ajax_bingo_end_game', function(){
     $players_count = intval($_POST['playersCount'] ?? 0);
     $gross = floatval($_POST['gross'] ?? 0);
     $retailor_cut = floatval($_POST['retailorCut'] ?? 0);
+    $game_session_id = sanitize_text_field($_POST['gameSessionId'] ?? '');
     
-    if ($players_count < 0 || $gross < 0 || $retailor_cut < 0) {
-        wp_send_json_error(['message' => 'Invalid data'], 400);
+    // Validate that meaningful game data was provided
+    if ($players_count <= 0 || $gross <= 0) {
+        wp_send_json_error(['message' => 'Invalid game data - no players or gross amount'], 400);
     }
     
-    // Get existing today_games_json
-    $today_games_json = get_field('today_games_json', 'user_' . $user_id);
-    $json_array = json_decode($today_games_json, true) ?: [];
+    if ($retailor_cut < 0) {
+        wp_send_json_error(['message' => 'Invalid retailor cut'], 400);
+    }
     
-    // Append new game session data
-    $json_array[] = [
-        'start_time' => current_time('mysql'), // WordPress timezone
-        'players_count' => $players_count,
-        'gross' => $gross,
-        'retailor_cut' => $retailor_cut
-    ];
+    // Use database transaction for data consistency
+    global $wpdb;
+    $wpdb->query('START TRANSACTION');
     
-    // Update the field
-    update_field('today_games_json', json_encode($json_array, JSON_UNESCAPED_UNICODE), 'user_' . $user_id);
-    
-    // Send minimal response (fire-and-forget)
-    wp_send_json_success(['message' => 'Game session logged']);
+    try {
+        // Get existing today_games_json
+        $today_games_json = get_field('today_games_json', 'user_' . $user_id);
+        $json_array = json_decode($today_games_json, true) ?: [];
+        
+        // Check for duplicate session ID to prevent duplicate entries
+        if (!empty($game_session_id)) {
+            foreach ($json_array as $existing_game) {
+                if (isset($existing_game['session_id']) && $existing_game['session_id'] === $game_session_id) {
+                    wp_send_json_success(['message' => 'Game session already recorded']);
+                    return;
+                }
+            }
+        }
+        
+        // Additional duplicate check: same data within last 5 minutes
+        $current_time = current_time('timestamp');
+        $five_minutes_ago = $current_time - 300; // 5 minutes in seconds
+        
+        foreach ($json_array as $existing_game) {
+            if (isset($existing_game['recorded_at'])) {
+                $recorded_timestamp = strtotime($existing_game['recorded_at']);
+                if ($recorded_timestamp > $five_minutes_ago && 
+                    $existing_game['players_count'] == $players_count &&
+                    $existing_game['gross'] == $gross &&
+                    $existing_game['retailor_cut'] == $retailor_cut) {
+                    wp_send_json_success(['message' => 'Duplicate game session detected and ignored']);
+                    return;
+                }
+            }
+        }
+        
+        // Append new game session data with timestamp
+        $game_data = [
+            'start_time' => current_time('mysql'), // WordPress timezone
+            'players_count' => $players_count,
+            'gross' => $gross,
+            'retailor_cut' => $retailor_cut,
+            'recorded_at' => current_time('mysql'),
+            'session_id' => $game_session_id
+        ];
+        
+        $json_array[] = $game_data;
+        
+        // Update the field
+        $update_result = update_field('today_games_json', json_encode($json_array, JSON_UNESCAPED_UNICODE), 'user_' . $user_id);
+        
+        if ($update_result === false) {
+            throw new Exception('Failed to update game data');
+        }
+        
+        $wpdb->query('COMMIT');
+        
+        // Send success response
+        wp_send_json_success([
+            'message' => 'Game session logged successfully',
+            'recorded_at' => $game_data['recorded_at']
+        ]);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        error_log('Bingo game end error: ' . $e->getMessage());
+        wp_send_json_error(['message' => 'Failed to record game session'], 500);
+    }
 });
 
 ?>
