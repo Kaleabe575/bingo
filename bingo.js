@@ -1,11 +1,31 @@
  (function($){
      $(document).ready(function(){
+         // Only run on game page - check for game-specific elements
+         const $gamePrizeEl = $('#GamePrize > h2');
+         const $betEl = $('#bet > h2');
+         const $playBtn = $('#play_pause_game a.elementor-button');
+         
+         // If game elements don't exist, this isn't the game page - exit early
+         if (!$gamePrizeEl.length && !$betEl.length && !$playBtn.length) {
+             return;
+         }
+         
          const ss = window.sessionStorage;
          const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
          const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
          const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
          const pattern = ss.getItem('pattern') || '1';
          const requiredLines = parseInt(pattern, 10) || 1; // Default to 1 line if pattern is invalid
+        
+         // Additional validation - ensure we have the required session data
+         if (!activeCards.length || !activeCartdsBinogoNumber.length || !cartelaPrice) {
+             console.error('Missing required session data for game initialization');
+             if ($playBtn.length) {
+                 $playBtn.prop('disabled', true);
+                 $playBtn.find('.elementor-button-text').text('Invalid Game Data');
+             }
+             return;
+         }
         
          // Game state variables to be populated from backend
          let gamePrize = 0;
@@ -19,14 +39,12 @@
          // Cache runtime data to avoid repeated API calls
          let cachedRuntime = null;
          let gameStarted = false;
-
-         const $gamePrizeEl = $('#GamePrize > h2');
-         const $betEl = $('#bet > h2');
-         const $playBtn = $('#play_pause_game a.elementor-button');
          
          // Initially disable play button and show loading state
-         $playBtn.prop('disabled', true);
-         $playBtn.find('.elementor-button-text').text('Loading...');
+         if ($playBtn.length) {
+             $playBtn.prop('disabled', true);
+             $playBtn.find('.elementor-button-text').text('Loading...');
+         }
          
          // Initialize game by sending data to backend
          initializeGame();
@@ -104,13 +122,15 @@
                  if ($betEl.length) { $betEl.text(cartelaPrice); }
                  
                  // Enable/disable play button based on canPlay
-                 $playBtn.prop('disabled', false);
-                 if (canPlay) {
-                     $playBtn.find('.elementor-button-text').text('Play');
-                     $playBtn.removeClass('disabled-btn');
-                 } else {
-                     $playBtn.find('.elementor-button-text').text('Insufficient Balance');
-                     $playBtn.addClass('disabled-btn');
+                 if ($playBtn.length) {
+                     $playBtn.prop('disabled', false);
+                     if (canPlay) {
+                         $playBtn.find('.elementor-button-text').text('Play');
+                         $playBtn.removeClass('disabled-btn');
+                     } else {
+                         $playBtn.find('.elementor-button-text').text('Insufficient Balance');
+                         $playBtn.addClass('disabled-btn');
+                     }
                  }
                  
                  console.log('Game initialized:', {
