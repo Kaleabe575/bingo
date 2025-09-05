@@ -15,6 +15,88 @@
      let gameStarted = false;
      let backendGameData = null;
      
+     // Define initializeGame function before using it
+     async function initializeGame() {
+         try {
+             const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
+             
+             // Fetch both game init and runtime data in parallel for faster loading
+             const [initResp, runtimeResp] = await Promise.all([
+                 fetch(url, { 
+                     method: 'POST', 
+                     body: (() => {
+                         const form = new FormData();
+                         form.append('action', 'bingo_init_game');
+                         form.append('activeCards', JSON.stringify(activeCards));
+                         form.append('cartelaPrice', String(cartelaPrice));
+                         form.append('_', String(Date.now()));
+                         return form;
+                     })(),
+                     cache: 'no-store', 
+                     credentials: 'same-origin', 
+                     headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                 }),
+                 fetch(url, { 
+                     method: 'POST', 
+                     body: (() => {
+                         const form = new FormData();
+                         form.append('action', 'bingo_get_runtime');
+                         form.append('_', String(Date.now()));
+                         return form;
+                     })(),
+                     cache: 'no-store', 
+                     credentials: 'same-origin', 
+                     headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                 })
+             ]);
+             
+             const [initPayload, runtimePayload] = await Promise.all([
+                 initResp.json().catch(() => null),
+                 runtimeResp.json().catch(() => null)
+             ]);
+             
+             if (!initPayload || !initPayload.success) {
+                 throw new Error('Backend initialization failed');
+             }
+             
+             const data = initPayload.data;
+             
+             // Populate game variables from backend response
+             gamePrize = Number(data.gamePrize || 0);
+             canPlay = Boolean(data.canPlay);
+             
+             // Store backend data for game start API call
+             backendGameData = {
+                 systemCut: Number(data.systemCommission || 0),
+                 retailorCut: Number(data.retailorCut || 0),
+                 gross: Number(data.gross || 0),
+                 numberOfPlayers: Number(data.numberOfPlayers || 0)
+             };
+             
+             // Cache runtime data for instant play button response
+             if (runtimePayload && runtimePayload.success) {
+                 const runtimeData = runtimePayload.data;
+                 cachedRuntime = { 
+                     cartelas_balance: Number(runtimeData.cartelas_balance || 0), 
+                     game_speed: Number(runtimeData.game_speed || 3), 
+                     checking_pattern: Array.isArray(runtimeData.checking_pattern) ? runtimeData.checking_pattern : [] 
+                 };
+                 gameSpeed = (cachedRuntime.game_speed) * 1000;
+                 allowedPatterns = cachedRuntime.checking_pattern;
+             }
+             
+             gameInitialized = true;
+             
+             console.log('Game initialized:', {
+                 gamePrize, canPlay, backendGameData
+             });
+             
+         } catch (e) {
+             console.error('Game initialization error:', e);
+             throw e; // Re-throw for promise chain
+         }
+     }
+
      // Check if we have required session data - if so, start initialization immediately
      let initializationPromise = null;
      if (activeCards.length && activeCartdsBinogoNumber.length && cartelaPrice) {
@@ -90,86 +172,6 @@
              }
          }
 
-         async function initializeGame() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 
-                 // Fetch both game init and runtime data in parallel for faster loading
-                 const [initResp, runtimeResp] = await Promise.all([
-                     fetch(url, { 
-                         method: 'POST', 
-                         body: (() => {
-                             const form = new FormData();
-                             form.append('action', 'bingo_init_game');
-                             form.append('activeCards', JSON.stringify(activeCards));
-                             form.append('cartelaPrice', String(cartelaPrice));
-                             form.append('_', String(Date.now()));
-                             return form;
-                         })(),
-                         cache: 'no-store', 
-                         credentials: 'same-origin', 
-                         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
-                     }),
-                     fetch(url, { 
-                         method: 'POST', 
-                         body: (() => {
-                             const form = new FormData();
-                             form.append('action', 'bingo_get_runtime');
-                             form.append('_', String(Date.now()));
-                             return form;
-                         })(),
-                         cache: 'no-store', 
-                         credentials: 'same-origin', 
-                         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
-                     })
-                 ]);
-                 
-                 const [initPayload, runtimePayload] = await Promise.all([
-                     initResp.json().catch(() => null),
-                     runtimeResp.json().catch(() => null)
-                 ]);
-                 
-                 if (!initPayload || !initPayload.success) {
-                     throw new Error('Backend initialization failed');
-                 }
-                 
-                 const data = initPayload.data;
-                 
-                 // Populate game variables from backend response
-                 gamePrize = Number(data.gamePrize || 0);
-                 canPlay = Boolean(data.canPlay);
-                 
-                 // Store backend data for game start API call
-                 backendGameData = {
-                     systemCut: Number(data.systemCommission || 0),
-                     retailorCut: Number(data.retailorCut || 0),
-                     gross: Number(data.gross || 0),
-                     numberOfPlayers: Number(data.numberOfPlayers || 0)
-                 };
-                 
-                 // Cache runtime data for instant play button response
-                 if (runtimePayload && runtimePayload.success) {
-                     const runtimeData = runtimePayload.data;
-                     cachedRuntime = { 
-                         cartelas_balance: Number(runtimeData.cartelas_balance || 0), 
-                         game_speed: Number(runtimeData.game_speed || 3), 
-                         checking_pattern: Array.isArray(runtimeData.checking_pattern) ? runtimeData.checking_pattern : [] 
-                     };
-                     gameSpeed = (cachedRuntime.game_speed) * 1000;
-                     allowedPatterns = cachedRuntime.checking_pattern;
-                 }
-                 
-                 gameInitialized = true;
-                 
-                 console.log('Game initialized:', {
-                     gamePrize, canPlay, backendGameData
-                 });
-                 
-             } catch (e) {
-                 console.error('Game initialization error:', e);
-                 throw e; // Re-throw for promise chain
-             }
-         }
 
          // Build id -> raw string columns map from session (no extra session writes)
          const idToCols = {};
