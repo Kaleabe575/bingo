@@ -1,23 +1,92 @@
  (function($){
-     $(document).ready(function(){
-         const ss = window.sessionStorage;
-         const playersCount = Number(ss.getItem('playersCount') || '0');
-         const gross = Number(ss.getItem('gross') || '0');
-         const GamePrize = Number(ss.getItem('GamePrize') || '0');
-         const systemCut = Number(ss.getItem('systemCut') || '0');
-         const retailorCut = Number(ss.getItem('retailorCut') || '0');
-         const reduceCartelaPrice = JSON.parse(ss.getItem('reduceCartelaPrice') || 'false');
-         const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
-         const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
-
+    $(document).ready(function(){
+        const ss = window.sessionStorage;
+        
+        // Load essential data from sessionStorage (set by game-setup.js)
+        const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
+        const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
         const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
         const pattern = ss.getItem('pattern') || '1';
         const requiredLines = parseInt(pattern, 10) || 1; // Default to 1 line if pattern is invalid
         
+        // Game variables that will be populated from backend
+        let GamePrize = 0;
+        let canPlay = false;
+        let systemCommission = 0;
+        let retailorCut = 0;
+        let gross = 0;
+        let numberOfPlayers = 0;
+        
+        // UI elements
         const $gamePrizeEl = $('#GamePrize > h2');
         const $betEl = $('#bet > h2');
-         if ($gamePrizeEl.length) { $gamePrizeEl.text(GamePrize); }
-         if ($betEl.length) { $betEl.text(cartelaPrice); }
+        const $playBtn = $('#play_pause_game a.elementor-button');
+        
+        // Set bet amount immediately
+        if ($betEl.length) { $betEl.text(cartelaPrice); }
+        
+        // Disable play button initially and show loading state
+        $playBtn.prop('disabled', true);
+        $playBtn.find('.elementor-button-text').text('Loading...');
+        
+        // Initialize game on page load
+        async function initializeGame() {
+            if (!activeCards.length || !cartelaPrice) {
+                alert('Game data not found. Please start from the setup page.');
+                return;
+            }
+            
+            try {
+                const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
+                const form = new FormData();
+                form.append('action', 'bingo_init_game');
+                form.append('activeCards', JSON.stringify(activeCards));
+                form.append('cartelaPrice', String(cartelaPrice));
+                form.append('_', String(Date.now()));
+                
+                const resp = await fetch(url, { 
+                    method: 'POST', 
+                    body: form, 
+                    cache: 'no-store', 
+                    credentials: 'same-origin', 
+                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                });
+                
+                const payload = await resp.json().catch(function(){ return null; });
+                
+                if (!payload || !payload.success) {
+                    const errorMsg = payload && payload.data && payload.data.message ? payload.data.message : 'Failed to initialize game';
+                    alert(errorMsg);
+                    return;
+                }
+                
+                const data = payload.data;
+                GamePrize = Number(data.gamePrize || 0);
+                canPlay = Boolean(data.canPlay);
+                systemCommission = Number(data.systemCommission || 0);
+                retailorCut = Number(data.retailorCut || 0);
+                gross = Number(data.gross || 0);
+                numberOfPlayers = Number(data.numberOfPlayers || 0);
+                
+                // Update UI
+                if ($gamePrizeEl.length) { $gamePrizeEl.text(GamePrize); }
+                
+                if (canPlay) {
+                    $playBtn.prop('disabled', false);
+                    $playBtn.find('.elementor-button-text').text('Play');
+                } else {
+                    $playBtn.prop('disabled', true);
+                    $playBtn.find('.elementor-button-text').text('Insufficient Balance');
+                }
+                
+            } catch (error) {
+                console.error('Game initialization error:', error);
+                alert('Unable to initialize game. Please try again.');
+            }
+        }
+        
+        // Initialize the game
+        initializeGame();
 
          // Build id -> raw string columns map from session (no extra session writes)
          const idToCols = {};
@@ -398,23 +467,45 @@
              } catch (e) { return null; }
          }
 
-         async function startGameWithValidation() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_start_game');
-                 form.append('systemCut', String(systemCut));
-                 form.append('retailorCut', String(retailorCut));
-                 form.append('gross', String(gross));
-                 form.append('_', String(Date.now()));
-                 const resp = await fetch(url, { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
-                 const payload = await resp.json().catch(function(){ return null; });
-                 if (!payload) return false;
-                 if (payload.success) { return true; }
-                 const msg = payload.data && payload.data.message ? payload.data.message : 'Game start failed';
-                 alert(msg); return false;
-             } catch (e) { alert('Unable to start game. Please try again.'); return false; }
-         }
+                 async function startGameWithValidation() {
+            // Check canPlay status first
+            if (!canPlay) {
+                alert('Not Enough Balance Please Recharge');
+                return false;
+            }
+            
+            try {
+                const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
+                const form = new FormData();
+                form.append('action', 'bingo_start_game');
+                form.append('systemCommission', String(systemCommission));
+                form.append('retailorCut', String(retailorCut));
+                form.append('gross', String(gross));
+                form.append('numberOfPlayers', String(numberOfPlayers));
+                form.append('_', String(Date.now()));
+                
+                const resp = await fetch(url, { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
+                const payload = await resp.json().catch(function(){ return null; });
+                
+                if (!payload) {
+                    alert('Network error. Please try again.');
+                    return false;
+                }
+                
+                if (payload.success) { 
+                    console.log('Game started successfully:', payload.data);
+                    return true; 
+                }
+                
+                const msg = payload.data && payload.data.message ? payload.data.message : 'Game start failed';
+                alert(msg); 
+                return false;
+            } catch (e) { 
+                console.error('Game start error:', e);
+                alert('Unable to start game. Please try again.'); 
+                return false; 
+            }
+        }
 
          $(document).on("click", "#play_pause_game a.elementor-button", async function(e){
              e.preventDefault();
@@ -443,23 +534,7 @@
              }
          });
 
-         function sendGameEndData() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_end_game');
-                 form.append('playersCount', String(playersCount));
-                 form.append('gross', String(gross));
-                 form.append('retailorCut', String(retailorCut));
-                 form.append('_', String(Date.now()));
-                 if (navigator.sendBeacon) { navigator.sendBeacon(url, form); }
-                 else { fetch(url, { method: 'POST', body: form, keepalive: true }).catch(function(){}); }
-             } catch (e) {}
-         }
-
-
-         window.addEventListener('beforeunload', function(){ sendGameEndData(); });
-         document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') sendGameEndData(); });
+                 // Game end tracking removed as it's now handled in game start
      });
  })(jQuery);
 
