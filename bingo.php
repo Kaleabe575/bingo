@@ -40,6 +40,68 @@ add_action('wp_ajax_bingo_get_runtime', function(){
     ]);
 });
 
+// Game initialization handler: calculate game values and validate balance
+add_action('wp_ajax_bingo_init_game', function(){
+    bingo_send_nocache_headers();
+    
+    $user_id = get_current_user_id();
+    if (!$user_id) {
+        wp_send_json_error(['message' => 'Not logged in'], 401);
+    }
+    
+    // Check user role
+    if (!user_can($user_id, 'um_retailor')) {
+        wp_send_json_error(['message' => 'Insufficient permissions'], 403);
+    }
+    
+    // Sanitize and validate input
+    $active_cards = json_decode(stripslashes($_POST['activeCards'] ?? '[]'), true);
+    $cartela_price = floatval($_POST['cartelaPrice'] ?? 0);
+    
+    if (!is_array($active_cards) || empty($active_cards)) {
+        wp_send_json_error(['message' => 'Invalid active cards'], 400);
+    }
+    
+    if ($cartela_price <= 0) {
+        wp_send_json_error(['message' => 'Invalid cartela price'], 400);
+    }
+    
+    // Backend constants
+    $player_threshold = 5;
+    $retailor_cut_percentage = 0.20;
+    $system_commission_percentage = 0.20;
+    
+    // Calculate game values
+    $number_of_players = count($active_cards);
+    $gross = $cartela_price * $number_of_players;
+    
+    // Only apply cuts if players meet threshold
+    if ($number_of_players >= $player_threshold) {
+        $retailor_cut = $gross * $retailor_cut_percentage;
+        $system_commission = $retailor_cut * $system_commission_percentage;
+    } else {
+        $retailor_cut = 0;
+        $system_commission = 0;
+    }
+    
+    $game_prize = $gross - $retailor_cut;
+    
+    // Check user balance
+    $cartelas_balance = intval(get_field('cartelas_balance', 'user_' . $user_id)) ?: 0;
+    $can_play = $cartelas_balance >= $system_commission;
+    
+    // Return calculated values to frontend
+    wp_send_json_success([
+        'gamePrize' => $game_prize,
+        'canPlay' => $can_play,
+        'systemCommission' => $system_commission,
+        'retailorCut' => $retailor_cut,
+        'gross' => $gross,
+        'numberOfPlayers' => $number_of_players,
+        'currentBalance' => $cartelas_balance
+    ]);
+});
+
 // Game start handler: check balance, deduct systemCut, increment sales/profit
 add_action('wp_ajax_bingo_start_game', function(){
     bingo_send_nocache_headers();
@@ -58,8 +120,9 @@ add_action('wp_ajax_bingo_start_game', function(){
     $system_cut = floatval($_POST['systemCut'] ?? 0);
     $retailor_cut = floatval($_POST['retailorCut'] ?? 0);
     $gross = floatval($_POST['gross'] ?? 0);
+    $number_of_players = intval($_POST['numberOfPlayers'] ?? 0);
     
-    if ($system_cut < 0 || $retailor_cut < 0 || $gross < 0) {
+    if ($system_cut < 0 || $retailor_cut < 0 || $gross < 0 || $number_of_players < 0) {
         wp_send_json_error(['message' => 'Invalid amounts'], 400);
     }
     
@@ -88,10 +151,30 @@ add_action('wp_ajax_bingo_start_game', function(){
         $current_profit = intval(get_field('total_profit', 'user_' . $user_id)) ?: 0;
         update_field('total_profit', $current_profit + $retailor_cut, 'user_' . $user_id);
         
+        // Update today_games_json with unique game ID
+        $today_games_json = get_field('today_games_json', 'user_' . $user_id);
+        $json_array = json_decode($today_games_json, true) ?: [];
+        
+        // Generate unique game ID to avoid duplicates
+        $game_id = uniqid('game_' . $user_id . '_', true);
+        
+        // Append new game session data
+        $json_array[] = [
+            'game_id' => $game_id,
+            'start_time' => current_time('mysql'),
+            'players_count' => $number_of_players,
+            'gross' => $gross,
+            'retailor_cut' => $retailor_cut,
+            'system_cut' => $system_cut
+        ];
+        
+        update_field('today_games_json', json_encode($json_array, JSON_UNESCAPED_UNICODE), 'user_' . $user_id);
+        
         $wpdb->query('COMMIT');
         
         wp_send_json_success([
             'new_balance' => $new_balance,
+            'game_id' => $game_id,
             'message' => 'Game started successfully'
         ]);
         
@@ -101,47 +184,6 @@ add_action('wp_ajax_bingo_start_game', function(){
     }
 });
 
-// Game end handler: append session data to today_games_json
-add_action('wp_ajax_bingo_end_game', function(){
-    bingo_send_nocache_headers();
-    
-    $user_id = get_current_user_id();
-    if (!$user_id) {
-        wp_send_json_error(['message' => 'Not logged in'], 401);
-    }
-    
-    // Check user role
-    if (!user_can($user_id, 'um_retailor')) {
-        wp_send_json_error(['message' => 'Insufficient permissions'], 403);
-    }
-    
-    // Sanitize input
-    $players_count = intval($_POST['playersCount'] ?? 0);
-    $gross = floatval($_POST['gross'] ?? 0);
-    $retailor_cut = floatval($_POST['retailorCut'] ?? 0);
-    
-    if ($players_count < 0 || $gross < 0 || $retailor_cut < 0) {
-        wp_send_json_error(['message' => 'Invalid data'], 400);
-    }
-    
-    // Get existing today_games_json
-    $today_games_json = get_field('today_games_json', 'user_' . $user_id);
-    $json_array = json_decode($today_games_json, true) ?: [];
-    
-    // Append new game session data
-    $json_array[] = [
-        'start_time' => current_time('mysql'), // WordPress timezone
-        'players_count' => $players_count,
-        'gross' => $gross,
-        'retailor_cut' => $retailor_cut
-    ];
-    
-    // Update the field
-    update_field('today_games_json', json_encode($json_array, JSON_UNESCAPED_UNICODE), 'user_' . $user_id);
-    
-    // Send minimal response (fire-and-forget)
-    wp_send_json_success(['message' => 'Game session logged']);
-});
 
 ?>
 

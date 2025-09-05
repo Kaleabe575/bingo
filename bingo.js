@@ -1,23 +1,92 @@
  (function($){
      $(document).ready(function(){
          const ss = window.sessionStorage;
-         const playersCount = Number(ss.getItem('playersCount') || '0');
-         const gross = Number(ss.getItem('gross') || '0');
-         const GamePrize = Number(ss.getItem('GamePrize') || '0');
-         const systemCut = Number(ss.getItem('systemCut') || '0');
-         const retailorCut = Number(ss.getItem('retailorCut') || '0');
-         const reduceCartelaPrice = JSON.parse(ss.getItem('reduceCartelaPrice') || 'false');
          const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
          const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
-
-        const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
-        const pattern = ss.getItem('pattern') || '1';
-        const requiredLines = parseInt(pattern, 10) || 1; // Default to 1 line if pattern is invalid
+         const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
+         const pattern = ss.getItem('pattern') || '1';
+         const requiredLines = parseInt(pattern, 10) || 1; // Default to 1 line if pattern is invalid
         
-        const $gamePrizeEl = $('#GamePrize > h2');
-        const $betEl = $('#bet > h2');
-         if ($gamePrizeEl.length) { $gamePrizeEl.text(GamePrize); }
-         if ($betEl.length) { $betEl.text(cartelaPrice); }
+         // Game state variables to be populated from backend
+         let gamePrize = 0;
+         let canPlay = false;
+         let systemCut = 0;
+         let retailorCut = 0;
+         let gross = 0;
+         let numberOfPlayers = 0;
+         let gameInitialized = false;
+
+         const $gamePrizeEl = $('#GamePrize > h2');
+         const $betEl = $('#bet > h2');
+         const $playBtn = $('#play_pause_game a.elementor-button');
+         
+         // Initially disable play button and show loading state
+         $playBtn.prop('disabled', true);
+         $playBtn.find('.elementor-button-text').text('Loading...');
+         
+         // Initialize game by sending data to backend
+         initializeGame();
+
+         async function initializeGame() {
+             try {
+                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
+                 const form = new FormData();
+                 form.append('action', 'bingo_init_game');
+                 form.append('activeCards', JSON.stringify(activeCards));
+                 form.append('cartelaPrice', String(cartelaPrice));
+                 form.append('_', String(Date.now()));
+                 
+                 const resp = await fetch(url, { 
+                     method: 'POST', 
+                     body: form, 
+                     cache: 'no-store', 
+                     credentials: 'same-origin', 
+                     headers: { 
+                         'Cache-Control': 'no-cache', 
+                         'Pragma': 'no-cache' 
+                     } 
+                 });
+                 
+                 const payload = await resp.json().catch(function(){ return null; });
+                 if (!payload || !payload.success) {
+                     alert('Failed to initialize game. Please try again.');
+                     return;
+                 }
+                 
+                 const data = payload.data;
+                 
+                 // Populate game variables from backend response
+                 gamePrize = Number(data.gamePrize || 0);
+                 canPlay = Boolean(data.canPlay);
+                 systemCut = Number(data.systemCommission || 0);
+                 retailorCut = Number(data.retailorCut || 0);
+                 gross = Number(data.gross || 0);
+                 numberOfPlayers = Number(data.numberOfPlayers || 0);
+                 gameInitialized = true;
+                 
+                 // Update UI elements
+                 if ($gamePrizeEl.length) { $gamePrizeEl.text(gamePrize); }
+                 if ($betEl.length) { $betEl.text(cartelaPrice); }
+                 
+                 // Enable/disable play button based on canPlay
+                 $playBtn.prop('disabled', false);
+                 if (canPlay) {
+                     $playBtn.find('.elementor-button-text').text('Play');
+                     $playBtn.removeClass('disabled-btn');
+                 } else {
+                     $playBtn.find('.elementor-button-text').text('Insufficient Balance');
+                     $playBtn.addClass('disabled-btn');
+                 }
+                 
+                 console.log('Game initialized:', {
+                     gamePrize, canPlay, systemCut, retailorCut, gross, numberOfPlayers
+                 });
+                 
+             } catch (e) {
+                 console.error('Game initialization error:', e);
+                 alert('Failed to initialize game. Please try again.');
+             }
+         }
 
          // Build id -> raw string columns map from session (no extra session writes)
          const idToCols = {};
@@ -406,11 +475,15 @@
                  form.append('systemCut', String(systemCut));
                  form.append('retailorCut', String(retailorCut));
                  form.append('gross', String(gross));
+                 form.append('numberOfPlayers', String(numberOfPlayers));
                  form.append('_', String(Date.now()));
                  const resp = await fetch(url, { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
                  const payload = await resp.json().catch(function(){ return null; });
                  if (!payload) return false;
-                 if (payload.success) { return true; }
+                 if (payload.success) { 
+                     console.log('Game started successfully:', payload.data);
+                     return true; 
+                 }
                  const msg = payload.data && payload.data.message ? payload.data.message : 'Game start failed';
                  alert(msg); return false;
              } catch (e) { alert('Unable to start game. Please try again.'); return false; }
@@ -420,8 +493,16 @@
              e.preventDefault();
              const $btn=$(this);
              if ($btn.prop('disabled')) return;
+             
+             // Check if game is initialized
+             if (!gameInitialized) {
+                 alert('Game not initialized yet. Please wait.');
+                 return;
+             }
+             
              $btn.prop('disabled', true);
              if (!navigator.onLine) { alert('No internet connection.'); $btn.prop('disabled', false); return; }
+             
              const runtime = await fetchRuntime();
              if (!runtime) { alert('Unable to fetch game settings.'); $btn.prop('disabled', false); return; }
              const fetchedSpeed = Number(runtime.game_speed || 3);
@@ -435,6 +516,13 @@
                  // Resume
                  interval=setInterval(callNextNumber,gameSpeed); gamePaused=false; $btn.find('.elementor-button-text').text('Pause'); playAudio('game-resumed.mp3'); $btn.prop('disabled', false);
              } else {
+                 // Check if user can play before starting game
+                 if (!canPlay) {
+                     alert('Not Enough Balance Please Recharge');
+                     $btn.prop('disabled', false);
+                     return;
+                 }
+                 
                  const validated = await startGameWithValidation();
                  if (!validated) { $btn.prop('disabled', false); return; }
                  numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
@@ -443,23 +531,6 @@
              }
          });
 
-         function sendGameEndData() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_end_game');
-                 form.append('playersCount', String(playersCount));
-                 form.append('gross', String(gross));
-                 form.append('retailorCut', String(retailorCut));
-                 form.append('_', String(Date.now()));
-                 if (navigator.sendBeacon) { navigator.sendBeacon(url, form); }
-                 else { fetch(url, { method: 'POST', body: form, keepalive: true }).catch(function(){}); }
-             } catch (e) {}
-         }
-
-
-         window.addEventListener('beforeunload', function(){ sendGameEndData(); });
-         document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') sendGameEndData(); });
      });
  })(jQuery);
 
