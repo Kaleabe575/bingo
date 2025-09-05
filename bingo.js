@@ -15,6 +15,10 @@
          let gross = 0;
          let numberOfPlayers = 0;
          let gameInitialized = false;
+         
+         // Cache runtime data to avoid repeated API calls
+         let cachedRuntime = null;
+         let gameStarted = false;
 
          const $gamePrizeEl = $('#GamePrize > h2');
          const $betEl = $('#bet > h2');
@@ -30,30 +34,48 @@
          async function initializeGame() {
              try {
                  const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_init_game');
-                 form.append('activeCards', JSON.stringify(activeCards));
-                 form.append('cartelaPrice', String(cartelaPrice));
-                 form.append('_', String(Date.now()));
                  
-                 const resp = await fetch(url, { 
-                     method: 'POST', 
-                     body: form, 
-                     cache: 'no-store', 
-                     credentials: 'same-origin', 
-                     headers: { 
-                         'Cache-Control': 'no-cache', 
-                         'Pragma': 'no-cache' 
-                     } 
-                 });
+                 // Fetch both game init and runtime data in parallel for faster loading
+                 const [initResp, runtimeResp] = await Promise.all([
+                     fetch(url, { 
+                         method: 'POST', 
+                         body: (() => {
+                             const form = new FormData();
+                             form.append('action', 'bingo_init_game');
+                             form.append('activeCards', JSON.stringify(activeCards));
+                             form.append('cartelaPrice', String(cartelaPrice));
+                             form.append('_', String(Date.now()));
+                             return form;
+                         })(),
+                         cache: 'no-store', 
+                         credentials: 'same-origin', 
+                         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                     }),
+                     fetch(url, { 
+                         method: 'POST', 
+                         body: (() => {
+                             const form = new FormData();
+                             form.append('action', 'bingo_get_runtime');
+                             form.append('_', String(Date.now()));
+                             return form;
+                         })(),
+                         cache: 'no-store', 
+                         credentials: 'same-origin', 
+                         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                     })
+                 ]);
                  
-                 const payload = await resp.json().catch(function(){ return null; });
-                 if (!payload || !payload.success) {
+                 const [initPayload, runtimePayload] = await Promise.all([
+                     initResp.json().catch(() => null),
+                     runtimeResp.json().catch(() => null)
+                 ]);
+                 
+                 if (!initPayload || !initPayload.success) {
                      alert('Failed to initialize game. Please try again.');
                      return;
                  }
                  
-                 const data = payload.data;
+                 const data = initPayload.data;
                  
                  // Populate game variables from backend response
                  gamePrize = Number(data.gamePrize || 0);
@@ -62,6 +84,19 @@
                  retailorCut = Number(data.retailorCut || 0);
                  gross = Number(data.gross || 0);
                  numberOfPlayers = Number(data.numberOfPlayers || 0);
+                 
+                 // Cache runtime data for instant play button response
+                 if (runtimePayload && runtimePayload.success) {
+                     const runtimeData = runtimePayload.data;
+                     cachedRuntime = { 
+                         cartelas_balance: Number(runtimeData.cartelas_balance || 0), 
+                         game_speed: Number(runtimeData.game_speed || 3), 
+                         checking_pattern: Array.isArray(runtimeData.checking_pattern) ? runtimeData.checking_pattern : [] 
+                     };
+                     gameSpeed = (cachedRuntime.game_speed) * 1000;
+                     allowedPatterns = cachedRuntime.checking_pattern;
+                 }
+                 
                  gameInitialized = true;
                  
                  // Update UI elements
@@ -452,20 +487,6 @@
 			}
 		});
 
-         // Runtime fetch and start logic preserved below (unchanged other than readability)
-         async function fetchRuntime() {
-             try {
-                 const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
-                 const form = new FormData();
-                 form.append('action', 'bingo_get_runtime');
-                 form.append('_', String(Date.now()));
-                 const resp = await fetch(url, { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
-                 const payload = await resp.json().catch(function(){ return null; });
-                 if (!payload) return null;
-                 const data = payload && payload.success ? payload.data : payload;
-                 return { cartelas_balance: Number((data && data.cartelas_balance) || 0), game_speed: Number((data && data.game_speed) || 3), checking_pattern: (data && Array.isArray(data.checking_pattern)) ? data.checking_pattern : [] };
-             } catch (e) { return null; }
-         }
 
          async function startGameWithValidation() {
              try {
@@ -500,34 +521,60 @@
                  return;
              }
              
-             $btn.prop('disabled', true);
-             if (!navigator.onLine) { alert('No internet connection.'); $btn.prop('disabled', false); return; }
-             
-             const runtime = await fetchRuntime();
-             if (!runtime) { alert('Unable to fetch game settings.'); $btn.prop('disabled', false); return; }
-             const fetchedSpeed = Number(runtime.game_speed || 3);
-             gameSpeed = (Number.isFinite(fetchedSpeed) ? fetchedSpeed : 3) * 1000;
-             allowedPatterns = Array.isArray(runtime.checking_pattern) ? runtime.checking_pattern : [];
+             // Quick connection check
+             if (!navigator.onLine) { 
+                 alert('No internet connection.'); 
+                 return; 
+             }
 
              if(interval && !gamePaused){
-                 // Pause
-                 clearInterval(interval); interval=null; gamePaused=true; $btn.find('.elementor-button-text').text('Resume'); playAudio('Game-paused.mp3'); $btn.prop('disabled', false);
+                 // Pause - instant response, no API calls
+                 clearInterval(interval); 
+                 interval = null; 
+                 gamePaused = true; 
+                 $btn.find('.elementor-button-text').text('Resume'); 
+                 playAudio('Game-paused.mp3');
              } else if(gamePaused){
-                 // Resume
-                 interval=setInterval(callNextNumber,gameSpeed); gamePaused=false; $btn.find('.elementor-button-text').text('Pause'); playAudio('game-resumed.mp3'); $btn.prop('disabled', false);
+                 // Resume - instant response, no API calls
+                 interval = setInterval(callNextNumber, gameSpeed); 
+                 gamePaused = false; 
+                 $btn.find('.elementor-button-text').text('Pause'); 
+                 playAudio('game-resumed.mp3');
              } else {
-                 // Check if user can play before starting game
+                 // Starting new game
                  if (!canPlay) {
                      alert('Not Enough Balance Please Recharge');
-                     $btn.prop('disabled', false);
                      return;
                  }
                  
-                 const validated = await startGameWithValidation();
-                 if (!validated) { $btn.prop('disabled', false); return; }
-                 numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
-                 currentIndex = 0; calledCount = 0; callNextNumber(); interval = setInterval(callNextNumber, gameSpeed); $btn.find('.elementor-button-text').text('Pause');
-                 $btn.prop('disabled', false);
+                 // Disable button temporarily to prevent double-clicks
+                 $btn.prop('disabled', true);
+                 $btn.find('.elementor-button-text').text('Starting...');
+                 
+                 try {
+                     // Start game validation in background
+                     const validated = await startGameWithValidation();
+                     if (!validated) { 
+                         $btn.prop('disabled', false);
+                         $btn.find('.elementor-button-text').text('Play');
+                         return; 
+                     }
+                     
+                     // Start game immediately after validation
+                     gameStarted = true;
+                     numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
+                     currentIndex = 0; 
+                     calledCount = 0; 
+                     callNextNumber(); 
+                     interval = setInterval(callNextNumber, gameSpeed); 
+                     $btn.find('.elementor-button-text').text('Pause');
+                     $btn.prop('disabled', false);
+                 } catch (e) {
+                     console.error('Game start error:', e);
+                     $btn.prop('disabled', false);
+                     $btn.find('.elementor-button-text').text('Play');
+                     alert('Failed to start game. Please try again.');
+                 }
              }
          });
 
