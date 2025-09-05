@@ -30,15 +30,14 @@
          // Game state variables to be populated from backend
          let gamePrize = 0;
          let canPlay = false;
-         let systemCut = 0;
-         let retailorCut = 0;
-         let gross = 0;
-         let numberOfPlayers = 0;
          let gameInitialized = false;
          
          // Cache runtime data to avoid repeated API calls
          let cachedRuntime = null;
          let gameStarted = false;
+         
+         // Store backend data for API calls (only used when starting game)
+         let backendGameData = null;
          
          // Initially disable play button and show loading state
          if ($playBtn.length) {
@@ -98,10 +97,14 @@
                  // Populate game variables from backend response
                  gamePrize = Number(data.gamePrize || 0);
                  canPlay = Boolean(data.canPlay);
-                 systemCut = Number(data.systemCommission || 0);
-                 retailorCut = Number(data.retailorCut || 0);
-                 gross = Number(data.gross || 0);
-                 numberOfPlayers = Number(data.numberOfPlayers || 0);
+                 
+                 // Store backend data for game start API call
+                 backendGameData = {
+                     systemCut: Number(data.systemCommission || 0),
+                     retailorCut: Number(data.retailorCut || 0),
+                     gross: Number(data.gross || 0),
+                     numberOfPlayers: Number(data.numberOfPlayers || 0)
+                 };
                  
                  // Cache runtime data for instant play button response
                  if (runtimePayload && runtimePayload.success) {
@@ -134,7 +137,7 @@
                  }
                  
                  console.log('Game initialized:', {
-                     gamePrize, canPlay, systemCut, retailorCut, gross, numberOfPlayers
+                     gamePrize, canPlay, backendGameData
                  });
                  
              } catch (e) {
@@ -508,26 +511,37 @@
 		});
 
 
-         async function startGameWithValidation() {
+         function updateBackendGameStart() {
+             // Fire-and-forget backend update - don't block the user experience
              try {
                  const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
                  const form = new FormData();
                  form.append('action', 'bingo_start_game');
-                 form.append('systemCut', String(systemCut));
-                 form.append('retailorCut', String(retailorCut));
-                 form.append('gross', String(gross));
-                 form.append('numberOfPlayers', String(numberOfPlayers));
+                 form.append('systemCut', String(backendGameData.systemCut));
+                 form.append('retailorCut', String(backendGameData.retailorCut));
+                 form.append('gross', String(backendGameData.gross));
+                 form.append('numberOfPlayers', String(backendGameData.numberOfPlayers));
                  form.append('_', String(Date.now()));
-                 const resp = await fetch(url, { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
-                 const payload = await resp.json().catch(function(){ return null; });
-                 if (!payload) return false;
-                 if (payload.success) { 
-                     console.log('Game started successfully:', payload.data);
-                     return true; 
-                 }
-                 const msg = payload.data && payload.data.message ? payload.data.message : 'Game start failed';
-                 alert(msg); return false;
-             } catch (e) { alert('Unable to start game. Please try again.'); return false; }
+                 
+                 fetch(url, { 
+                     method: 'POST', 
+                     body: form, 
+                     cache: 'no-store', 
+                     credentials: 'same-origin', 
+                     headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } 
+                 }).then(resp => resp.json())
+                   .then(payload => {
+                       if (payload && payload.success) {
+                           console.log('Backend updated successfully:', payload.data);
+                       } else {
+                           console.warn('Backend update failed, but game continues');
+                       }
+                   }).catch(e => {
+                       console.warn('Backend update error, but game continues:', e);
+                   });
+             } catch (e) {
+                 console.warn('Backend update error, but game continues:', e);
+             }
          }
 
          $(document).on("click", "#play_pause_game a.elementor-button", async function(e){
@@ -567,34 +581,17 @@
                      return;
                  }
                  
-                 // Disable button temporarily to prevent double-clicks
-                 $btn.prop('disabled', true);
-                 $btn.find('.elementor-button-text').text('Starting...');
+                 // Start game INSTANTLY - user already validated during initialization
+                 gameStarted = true;
+                 numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
+                 currentIndex = 0; 
+                 calledCount = 0; 
+                 callNextNumber(); 
+                 interval = setInterval(callNextNumber, gameSpeed); 
+                 $btn.find('.elementor-button-text').text('Pause');
                  
-                 try {
-                     // Start game validation in background
-                     const validated = await startGameWithValidation();
-                     if (!validated) { 
-                         $btn.prop('disabled', false);
-                         $btn.find('.elementor-button-text').text('Play');
-                         return; 
-                     }
-                     
-                     // Start game immediately after validation
-                     gameStarted = true;
-                     numbers = numbers && numbers.length === 75 ? numbers : generateNumbers();
-                     currentIndex = 0; 
-                     calledCount = 0; 
-                     callNextNumber(); 
-                     interval = setInterval(callNextNumber, gameSpeed); 
-                     $btn.find('.elementor-button-text').text('Pause');
-                     $btn.prop('disabled', false);
-                 } catch (e) {
-                     console.error('Game start error:', e);
-                     $btn.prop('disabled', false);
-                     $btn.find('.elementor-button-text').text('Play');
-                     alert('Failed to start game. Please try again.');
-                 }
+                 // Update backend in background (don't wait for it)
+                 updateBackendGameStart();
              }
          });
 
