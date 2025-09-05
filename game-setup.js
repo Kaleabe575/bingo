@@ -84,26 +84,12 @@ document.addEventListener('DOMContentLoaded', function () {
         const selectedIds = checkedInputs.map(input => parseInt(String(input.value), 10)).filter(n => !Number.isNaN(n));
         const activeCartdsBinogoNumber = bingoCards.filter(card => selectedIds.includes(parseInt(String(card.id), 10)));
 
-        // Counts and pricing
+        // Read inputs (no pre-calculation stored)
         const playersCount = activeCards.length;
         const priceInput = document.getElementById('cartelaPrice');
         const priceValue = priceInput ? parseFloat(String(priceInput.value || '').trim()) : NaN;
-        
-        // Get pattern value
         const patternInput = document.getElementById('pattern');
-        const patternValue = patternInput ? parseFloat(String(patternInput.value || '').trim()) : NaN;
-
-        const gross = Number.isFinite(priceValue) ? playersCount * priceValue : 0;
-
-        const playerThreshold = 4;
-        const retailorCutPercentage = 0.20;
-        const systemCutPercentage = 0.20;
-
-        const retailorCut = playersCount >= playerThreshold ? gross * retailorCutPercentage : 0;
-        const systemCut = playersCount >= playerThreshold ? retailorCut * systemCutPercentage : 0;
-
-        const GamePrize = gross - retailorCut;
-        const reduceCartelaPrice = playersCount >= playerThreshold;
+        const patternValueStr = patternInput ? String((patternInput.value || '')).trim() : '';
 
         if (playersCount < 2) {
           alert('Not enough players. You must select at least 2.');
@@ -114,28 +100,8 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
           sessionStorage.setItem('activeCartdsBinogoNumber', JSON.stringify(activeCartdsBinogoNumber));
           sessionStorage.setItem('activeCards', JSON.stringify(activeCards));
-          sessionStorage.setItem('playersCount', String(playersCount));
-          sessionStorage.setItem('gross', String(gross));
           sessionStorage.setItem('cartelaPrice', String(Number.isFinite(priceValue) ? priceValue : 0));
-          sessionStorage.setItem('pattern', patternValue);
-          sessionStorage.setItem('GamePrize', String(GamePrize));
-          sessionStorage.setItem('systemCut', String(systemCut));
-          sessionStorage.setItem('retailorCut', String(retailorCut));
-          sessionStorage.setItem('reduceCartelaPrice', JSON.stringify(reduceCartelaPrice));
-
-          const sessionSnapshot = {
-            playersCount: Number(sessionStorage.getItem('playersCount') || '0'),
-            gross: Number(sessionStorage.getItem('gross') || '0'),
-            cartelaPrice: Number(sessionStorage.getItem('cartelaPrice') || '0'),
-            pattern: sessionStorage.getItem('pattern') || '',
-            retailorCut: Number(sessionStorage.getItem('retailorCut') || '0'),
-            systemCut: Number(sessionStorage.getItem('systemCut') || '0'),
-            GamePrize: Number(sessionStorage.getItem('GamePrize') || '0'),
-            reduceCartelaPrice: JSON.parse(sessionStorage.getItem('reduceCartelaPrice') || 'false'),
-            activeCartdsBinogoNumber: JSON.parse(sessionStorage.getItem('activeCartdsBinogoNumber') || '[]'),
-            activeCards: JSON.parse(sessionStorage.getItem('activeCards') || '[]')
-          };
-          console.log('Stored sessionStorage values:', sessionSnapshot);
+          sessionStorage.setItem('pattern', patternValueStr);
           // Navigate to game page after saving
           window.location.href = '/game';
         } catch (e) {
