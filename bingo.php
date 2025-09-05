@@ -25,10 +25,12 @@ add_action('wp_ajax_bingo_get_runtime', function(){
     $cartelas_balance = intval(get_field('cartelas_balance', 'user_' . $user_id));
     $game_speed = intval(get_field('game_speed', 'user_' . $user_id));
     $checking_pattern = get_field('checking_pattern', 'user_' . $user_id);
+    $game_sound = get_field('game_sound', 'user_' . $user_id);
 
     // Sensible defaults if empty
     if ($game_speed <= 0) { $game_speed = 3; }
     if ($cartelas_balance < 0) { $cartelas_balance = 0; }
+    if (empty($game_sound)) { $game_sound = 'Default'; }
 
     // Normalize checking_pattern to array of strings
     if (!is_array($checking_pattern)) { $checking_pattern = $checking_pattern ? [$checking_pattern] : []; }
@@ -36,7 +38,8 @@ add_action('wp_ajax_bingo_get_runtime', function(){
     wp_send_json_success([
         'cartelas_balance' => $cartelas_balance,
         'game_speed' => $game_speed,
-        'checking_pattern' => array_values(array_filter(array_map('strval', $checking_pattern)))
+        'checking_pattern' => array_values(array_filter(array_map('strval', $checking_pattern))),
+        'game_sound' => $game_sound
     ]);
 });
 

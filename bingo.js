@@ -17,6 +17,7 @@
      // Game settings that need to be accessible globally
      let gameSpeed = 3000; // Default fallback
      let allowedPatterns = [];
+     let soundPrefix = ''; // For sound customization (e.g., 'female-', 'male-', etc.)
      
      // Define initializeGame function before using it
      async function initializeGame() {
@@ -74,10 +75,19 @@
                  cachedRuntime = { 
                      cartelas_balance: Number(runtimeData.cartelas_balance || 0), 
                      game_speed: Number(runtimeData.game_speed || 3), 
-                     checking_pattern: Array.isArray(runtimeData.checking_pattern) ? runtimeData.checking_pattern : [] 
+                     checking_pattern: Array.isArray(runtimeData.checking_pattern) ? runtimeData.checking_pattern : [],
+                     game_sound: String(runtimeData.game_sound || 'Default')
                  };
                  gameSpeed = (cachedRuntime.game_speed) * 1000;
                  allowedPatterns = cachedRuntime.checking_pattern;
+                 
+                 // Set sound prefix based on user preference
+                 const soundSetting = cachedRuntime.game_sound;
+                 if (soundSetting === 'Default' || soundSetting === '' || !soundSetting) {
+                     soundPrefix = ''; // No prefix for default sounds
+                 } else {
+                     soundPrefix = soundSetting.toLowerCase() + '-'; // e.g., 'female-', 'male-'
+                 }
              }
              
              gameInitialized = true;
@@ -190,7 +200,17 @@
              try {
                  // Create new audio instance for each play to avoid conflicts
                  const audio = new Audio();
-                 const audioUrl = audioBase + '/' + file;
+                 
+                 // Apply sound prefix only to number files (1.mp3, 2.mp3, etc.)
+                 let finalFile = file;
+                 if (soundPrefix && /^\d+\.mp3$/.test(file)) {
+                     // This is a number file (e.g., "1.mp3", "15.mp3")
+                     const number = file.replace('.mp3', '');
+                     finalFile = soundPrefix + number.padStart(2, '0') + '.mp3'; // e.g., "female-01.mp3"
+                 }
+                 // Other files (Game-paused.mp3, won.mp3, etc.) remain unchanged
+                 
+                 const audioUrl = audioBase + '/' + finalFile;
                  audio.src = audioUrl;
                  audio.load();
                  
@@ -199,7 +219,13 @@
                  const playPromise = audio.play();
                  if (playPromise !== undefined) {
                      playPromise.catch(function(){
-                         // Silent fail - don't interrupt game flow
+                         // If custom sound fails, try default sound as fallback
+                         if (soundPrefix && /^\d+\.mp3$/.test(file)) {
+                             const fallbackAudio = new Audio();
+                             fallbackAudio.src = audioBase + '/' + file;
+                             fallbackAudio.volume = 0.7;
+                             fallbackAudio.play().catch(() => {});
+                         }
                      });
                  }
              } catch(e) {
