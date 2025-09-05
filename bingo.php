@@ -90,17 +90,10 @@ add_action('wp_ajax_bingo_init_game', function(){
     $cartelas_balance = intval(get_field('cartelas_balance', 'user_' . $user_id)) ?: 0;
     $can_play = $cartelas_balance >= $system_commission;
     
-    // Return only essential data to frontend
+    // Return only what frontend actually needs
     wp_send_json_success([
         'gamePrize' => $game_prize,
-        'canPlay' => $can_play,
-        // Backend data for game start API call
-        'gameData' => [
-            'systemCommission' => $system_commission,
-            'retailorCut' => $retailor_cut,
-            'gross' => $gross,
-            'numberOfPlayers' => $number_of_players
-        ]
+        'canPlay' => $can_play
     ]);
 });
 
@@ -118,14 +111,28 @@ add_action('wp_ajax_bingo_start_game', function(){
         wp_send_json_error(['message' => 'Insufficient permissions'], 403);
     }
     
-    // Sanitize and validate input
-    $system_cut = floatval($_POST['systemCut'] ?? 0);
-    $retailor_cut = floatval($_POST['retailorCut'] ?? 0);
-    $gross = floatval($_POST['gross'] ?? 0);
-    $number_of_players = intval($_POST['numberOfPlayers'] ?? 0);
+    // Get game data from session/frontend
+    $active_cards = json_decode(stripslashes($_POST['activeCards'] ?? '[]'), true);
+    $cartela_price = floatval($_POST['cartelaPrice'] ?? 0);
     
-    if ($system_cut < 0 || $retailor_cut < 0 || $gross < 0 || $number_of_players < 0) {
-        wp_send_json_error(['message' => 'Invalid amounts'], 400);
+    if (!is_array($active_cards) || empty($active_cards) || $cartela_price <= 0) {
+        wp_send_json_error(['message' => 'Invalid game data'], 400);
+    }
+    
+    // Recalculate values on backend (same logic as init)
+    $player_threshold = 5;
+    $retailor_cut_percentage = 0.20;
+    $system_commission_percentage = 0.20;
+    
+    $number_of_players = count($active_cards);
+    $gross = $cartela_price * $number_of_players;
+    
+    if ($number_of_players >= $player_threshold) {
+        $retailor_cut = $gross * $retailor_cut_percentage;
+        $system_cut = $retailor_cut * $system_commission_percentage;
+    } else {
+        $retailor_cut = 0;
+        $system_cut = 0;
     }
     
     // Get current balance

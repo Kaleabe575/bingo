@@ -13,7 +13,6 @@
      let gameInitialized = false;
      let cachedRuntime = null;
      let gameStarted = false;
-     let backendGameData = null;
      
      // Game settings that need to be accessible globally
      let gameSpeed = 3000; // Default fallback
@@ -68,14 +67,6 @@
              // Populate game variables from backend response
              gamePrize = Number(data.gamePrize || 0);
              canPlay = Boolean(data.canPlay);
-             
-             // Store backend data for game start API call
-             backendGameData = data.gameData || {
-                 systemCommission: 0,
-                 retailorCut: 0,
-                 gross: 0,
-                 numberOfPlayers: 0
-             };
              
              // Cache runtime data for instant play button response
              if (runtimePayload && runtimePayload.success) {
@@ -560,10 +551,8 @@
                  const url = window.ajaxurl || '/wp-admin/admin-ajax.php';
                  const form = new FormData();
                  form.append('action', 'bingo_start_game');
-                 form.append('systemCut', String(backendGameData.systemCommission));
-                 form.append('retailorCut', String(backendGameData.retailorCut));
-                 form.append('gross', String(backendGameData.gross));
-                 form.append('numberOfPlayers', String(backendGameData.numberOfPlayers));
+                 form.append('activeCards', JSON.stringify(activeCards));
+                 form.append('cartelaPrice', String(cartelaPrice));
                  form.append('_', String(Date.now()));
                  
                  fetch(url, { 
