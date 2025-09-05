@@ -1,4 +1,26 @@
  (function($){
+     // Start initialization immediately - don't wait for document ready
+     const ss = window.sessionStorage;
+     const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
+     const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
+     const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
+     const pattern = ss.getItem('pattern') || '1';
+     const requiredLines = parseInt(pattern, 10) || 1;
+     
+     // Game state variables
+     let gamePrize = 0;
+     let canPlay = false;
+     let gameInitialized = false;
+     let cachedRuntime = null;
+     let gameStarted = false;
+     let backendGameData = null;
+     
+     // Check if we have required session data - if so, start initialization immediately
+     let initializationPromise = null;
+     if (activeCards.length && activeCartdsBinogoNumber.length && cartelaPrice) {
+         initializationPromise = initializeGame();
+     }
+
      $(document).ready(function(){
          // Only run on game page - check for game-specific elements
          const $gamePrizeEl = $('#GamePrize > h2');
@@ -10,13 +32,6 @@
              return;
          }
          
-         const ss = window.sessionStorage;
-         const activeCards = JSON.parse(ss.getItem('activeCards') || '[]');
-         const activeCartdsBinogoNumber = JSON.parse(ss.getItem('activeCartdsBinogoNumber') || '[]');
-         const cartelaPrice = Number(ss.getItem('cartelaPrice') || '0');
-         const pattern = ss.getItem('pattern') || '1';
-         const requiredLines = parseInt(pattern, 10) || 1; // Default to 1 line if pattern is invalid
-        
          // Additional validation - ensure we have the required session data
          if (!activeCards.length || !activeCartdsBinogoNumber.length || !cartelaPrice) {
              console.error('Missing required session data for game initialization');
@@ -26,27 +41,54 @@
              }
              return;
          }
-        
-         // Game state variables to be populated from backend
-         let gamePrize = 0;
-         let canPlay = false;
-         let gameInitialized = false;
          
-         // Cache runtime data to avoid repeated API calls
-         let cachedRuntime = null;
-         let gameStarted = false;
-         
-         // Store backend data for API calls (only used when starting game)
-         let backendGameData = null;
-         
-         // Initially disable play button and show loading state
+         // Set initial loading state
          if ($playBtn.length) {
              $playBtn.prop('disabled', true);
              $playBtn.find('.elementor-button-text').text('Loading...');
          }
          
-         // Initialize game by sending data to backend
-         initializeGame();
+         // Wait for initialization to complete (might already be done)
+         if (initializationPromise) {
+             initializationPromise.then(() => {
+                 updateUIAfterInit($gamePrizeEl, $betEl, $playBtn);
+             }).catch(e => {
+                 console.error('Game initialization failed:', e);
+                 if ($playBtn.length) {
+                     $playBtn.prop('disabled', true);
+                     $playBtn.find('.elementor-button-text').text('Init Failed');
+                 }
+             });
+         } else {
+             // Start initialization now if not started earlier
+             initializeGame().then(() => {
+                 updateUIAfterInit($gamePrizeEl, $betEl, $playBtn);
+             }).catch(e => {
+                 console.error('Game initialization failed:', e);
+                 if ($playBtn.length) {
+                     $playBtn.prop('disabled', true);
+                     $playBtn.find('.elementor-button-text').text('Init Failed');
+                 }
+             });
+         }
+
+         function updateUIAfterInit($gamePrizeEl, $betEl, $playBtn) {
+             // Update UI elements after initialization is complete
+             if ($gamePrizeEl.length) { $gamePrizeEl.text(gamePrize); }
+             if ($betEl.length) { $betEl.text(cartelaPrice); }
+             
+             // Enable/disable play button based on canPlay
+             if ($playBtn.length) {
+                 $playBtn.prop('disabled', false);
+                 if (canPlay) {
+                     $playBtn.find('.elementor-button-text').text('Play');
+                     $playBtn.removeClass('disabled-btn');
+                 } else {
+                     $playBtn.find('.elementor-button-text').text('Insufficient Balance');
+                     $playBtn.addClass('disabled-btn');
+                 }
+             }
+         }
 
          async function initializeGame() {
              try {
@@ -88,8 +130,7 @@
                  ]);
                  
                  if (!initPayload || !initPayload.success) {
-                     alert('Failed to initialize game. Please try again.');
-                     return;
+                     throw new Error('Backend initialization failed');
                  }
                  
                  const data = initPayload.data;
@@ -120,29 +161,13 @@
                  
                  gameInitialized = true;
                  
-                 // Update UI elements
-                 if ($gamePrizeEl.length) { $gamePrizeEl.text(gamePrize); }
-                 if ($betEl.length) { $betEl.text(cartelaPrice); }
-                 
-                 // Enable/disable play button based on canPlay
-                 if ($playBtn.length) {
-                     $playBtn.prop('disabled', false);
-                     if (canPlay) {
-                         $playBtn.find('.elementor-button-text').text('Play');
-                         $playBtn.removeClass('disabled-btn');
-                     } else {
-                         $playBtn.find('.elementor-button-text').text('Insufficient Balance');
-                         $playBtn.addClass('disabled-btn');
-                     }
-                 }
-                 
                  console.log('Game initialized:', {
                      gamePrize, canPlay, backendGameData
                  });
                  
              } catch (e) {
                  console.error('Game initialization error:', e);
-                 alert('Failed to initialize game. Please try again.');
+                 throw e; // Re-throw for promise chain
              }
          }
 
