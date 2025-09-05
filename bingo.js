@@ -15,6 +15,10 @@
      let gameStarted = false;
      let backendGameData = null;
      
+     // Game settings that need to be accessible globally
+     let gameSpeed = 3000; // Default fallback
+     let allowedPatterns = [];
+     
      // Define initializeGame function before using it
      async function initializeGame() {
          try {
@@ -191,12 +195,10 @@
          } catch(e) {}
 
          // Game settings
-         let gameSpeed = 3000;
          const audioBase = '/wp-content/uploads/2025/08';
 
          let interval = null;
          let gamePaused = false;
-         let allowedPatterns = [];
          let numbers = [];
          let currentIndex = 0;
          let calledCount = 0;
